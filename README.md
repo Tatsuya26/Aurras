@@ -1,6 +1,7 @@
 # Aurras
 Aurras: Processamento de Ficheiros de Audio - Sistemas Operativos
 
-#Developers
+# Developers
 David Alves
+
 Tiago Alves
