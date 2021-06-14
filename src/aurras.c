@@ -8,6 +8,16 @@
 #include <stdlib.h>
 #include <sys/stat.h>
 
+char * formaLinhaArgs (char *argv[],int argc) {
+    char *buffer = malloc (150);
+    for (int i = 1;i < argc;i++) {
+        strcat(buffer,argv[i]);
+        strcat(buffer," ");
+    }
+    strcat(buffer,"\n");
+    return buffer;
+}
+
 
 int main(int argc,char *argv[]) {
     if (argc == 1) {
@@ -17,16 +27,15 @@ int main(int argc,char *argv[]) {
         write (1,"estado do servidor\n",19);
     }
     else if (argc >= 4 && strcmp(argv[1],"transform") == 0) {
-        int pw = open ("../tmp/servidor",O_WRONLY);
+        int pw = open ("servidor",O_WRONLY);
         char sPID[12];
         pid_t pid = getpid();
         sprintf(sPID, "%d", pid);
         mkfifo(sPID,0666);
         write(pw,&pid,4);
+        char *args = formaLinhaArgs (argv,argc);
         int pr = open (sPID,O_RDWR);
-        char buffer[4];
-        read(pr,buffer,4);
-        printf("%s\n",buffer);
+        write (pr,args,150);
         unlink(sPID);
         close(pw);
     }
