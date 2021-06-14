@@ -50,10 +50,20 @@ int main(int argc, char *argv[]) {
         char* filterFile[10];
         int filterLimit[10];
         numFiltros = getConf (fdConf,filterID,filterFile,filterLimit);
-        mkfifo("servidor",0666);
-        //while(1) {
-            //int pr = open("servidor",O_RDONLY);
-        //}
+        mkfifo("../tmp/servidor",0666);
+        while(1) {
+            int pr = open("../tmp/servidor",O_RDONLY);
+            pid_t pid = 0;
+            int res = read (pr,&pid,4);
+            if (res > 0) {
+            char clientPID[12];
+            sprintf(clientPID, "%d", pid);
+            int pw = open (clientPID,O_RDWR);
+            if (pw == -1) perror("");
+            else write (pw,"omg",4);
+            close(pr);
+            }
+        }
         }
     }
 }
