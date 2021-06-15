@@ -18,8 +18,45 @@ char * formaLinhaArgs (char *argv[],int argc) {
     return buffer;
 }
 
+ssize_t readln (int fd, char *buffer,size_t size) {
+	ssize_t res = 0;
+	ssize_t j = 0;
+	char local[1];
+
+	while ((res = read (fd,local,1)) > 0) {
+		if (local[0] != '\n') {
+				buffer[j] = local[0];
+				j++;
+			}
+			else {
+				buffer[j] = local[0];
+				j++;
+				return j;
+			}
+		}
+	return j;
+}
+
+void sighandler1 (int num) {
+    write (1,"pending...\n",11);
+}
+
+void sighandler2 (int num) {
+    write (1,"processing...\n",14);
+}
+
+void sigTerm (int num) {
+    pid_t pid = getpid();
+    char sPID[12];
+    sprintf(sPID, "%d", pid);
+    unlink(sPID);
+    _exit(0);
+}
 
 int main(int argc,char *argv[]) {
+    if (signal(SIGUSR1,sighandler1) == SIG_ERR) perror("");
+    if (signal(SIGUSR2,sighandler2) == SIG_ERR) perror("");
+    if (signal(SIGTERM,sigTerm) == SIG_ERR) perror("");
     if (argc == 1) {
         write (1,"./aurras status\n./aurras transform input-filename output-filename filter-id1 filter-id2 ...\n",92);
     }
@@ -33,11 +70,11 @@ int main(int argc,char *argv[]) {
         sprintf(sPID, "%d", pid);
         mkfifo(sPID,0666);
         write(pw,&pid,4);
+        close(pw);
         char *args = formaLinhaArgs (argv,argc);
         int pr = open (sPID,O_RDWR);
         write (pr,args,150);
-        unlink(sPID);
-        close(pw);
+        while (1) pause();
     }
     else write (1,"Comando nao reconhecido!\n",25);
 }
