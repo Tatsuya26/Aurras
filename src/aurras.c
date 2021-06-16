@@ -69,6 +69,8 @@ int main(int argc,char *argv[]) {
     }
     else if (argc == 2 && strcmp(argv[1],"status") == 0) {
         int pw = open ("servidor",O_WRONLY);
+        if (pw == -1) write (2,"Servidor nao esta aberto\n",25);
+        else {
         char sPID[12];
         char buffer[500];
         pid_t pid = getpid();
@@ -85,9 +87,12 @@ int main(int argc,char *argv[]) {
         while((res = readln (fr,buffer,500)) > 0)
             write (1,buffer,res);
         kill(getpid(),SIGTERM);
+        }
     }
     else if (argc >= 4 && strcmp(argv[1],"transform") == 0) {
         int pw = open ("servidor",O_WRONLY);
+        if (pw == -1) write (2,"Servidor nao esta aberto\n",25);
+        else {
         char sPID[12];
         pid_t pid = getpid();
         sprintf(sPID, "%d", pid);
@@ -98,6 +103,7 @@ int main(int argc,char *argv[]) {
         int pr = open (sPID,O_RDWR);
         write (pr,args,150);
         while (1) pause();
+        }
     }
     else write (1,"Comando nao reconhecido!\n",25);
 }

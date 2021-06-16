@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
+#include <signal.h>
 
 
 static int *numFiltros;
@@ -19,6 +20,14 @@ pid_t processID[1000];
 char *processInfo[1000];
 int numTarefasAtivas = 0;
 int numTarefasTotal = 0;
+
+void sigTermhandler (int num) {
+    unlink("servidor");
+    int s;
+    for (int i = 0; i < numTarefasAtivas;i++)
+        wait(&s);
+    _exit(0);
+}
 
 ssize_t readln (int fd, char *buffer,size_t size) {
 	ssize_t res = 0;
@@ -86,7 +95,7 @@ void aplicaFiltros (char *filtros[],int numFiltrosClient,char *fichEnt,char* fic
         else if (i == numFiltrosClient-1) {
             int p = fork();
             if (p == 0) {
-                int fdSaida = open (fichSaida,O_CREAT | O_WRONLY,0666);
+                int fdSaida = open (fichSaida,O_CREAT | O_TRUNC | O_WRONLY,0666);
                 dup2(fdSaida,1);
                 dup2(pipes[i-1][0],0);
                 int findex = checkFilter(filtros[i]);
@@ -94,7 +103,7 @@ void aplicaFiltros (char *filtros[],int numFiltrosClient,char *fichEnt,char* fic
                 _exit(0);
             }
             else {
-                close(pipes[i-1][0]);
+                close(pipes[i-1][0]);       
             }
         }
         else {
@@ -113,8 +122,9 @@ void aplicaFiltros (char *filtros[],int numFiltrosClient,char *fichEnt,char* fic
                 close(pipes[i-1][0]);
             }
         }
-        wait(&s);        
     }
+    for (int i = 0;i < numFiltrosClient;i++) 
+        wait(&s);
 }
 
 int possivelFiltro (char *filtros[],int numFiltrosClient) {
@@ -229,6 +239,7 @@ void transformFile (char *fichEnt,char *fichSaida,char *filtros[],int numFiltros
 }
 
 int main(int argc, char *argv[]) {
+    if (signal(SIGTERM,sigTermhandler) == SIG_ERR) perror("");
     if (argc == 3) {
         numFiltros = mmap(NULL,sizeof(int),PROT_READ | PROT_WRITE,MAP_SHARED | MAP_ANONYMOUS,-1,0);
         filterFile = mmap(NULL,sizeof(char*) * 10,PROT_READ | PROT_WRITE,MAP_SHARED | MAP_ANONYMOUS,-1,0);
