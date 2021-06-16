@@ -15,6 +15,10 @@ static char** filterID;
 static char** filterFile;
 static int* filterLimit;
 static int* filterUse;
+pid_t processID[1000];
+char *processInfo[1000];
+int numTarefasAtivas = 0;
+int numTarefasTotal = 0;
 
 ssize_t readln (int fd, char *buffer,size_t size) {
 	ssize_t res = 0;
@@ -135,12 +139,14 @@ void removeFiltros(char *filtros[],int numFiltrosClient) {
 
 int verificaFiltros (char *filtros[],int numFiltrosClient) {
     int r = 1;
+    int filterReserve[*numFiltros];
+    for (int i = 0;i < *numFiltros;i++) 
+        filterReserve[i] = filterUse[i]; 
     for (int i = 0;i < numFiltrosClient;i++) {
         int findex = checkFilter(filtros[i]);
-        filterUse[findex]++;
-        if (filterUse[findex] > filterLimit[findex]) r = 0;
+        filterReserve[findex]++;
+        if (filterReserve[findex] > filterLimit[findex]) r = 0;
     }
-    removeFiltros(filtros,numFiltrosClient);
     return r;
 }
 
@@ -151,6 +157,77 @@ void useFiltros(char *filtros[],int numFiltrosClient) {
     }
 }
 
+void preenchePInfo (char *fichEnt,char *fichSaida,char* filtros[],int numFiltrosClient) {
+    processInfo[numTarefasAtivas] = malloc(200);
+    char numProcesso[7] ; sprintf(numProcesso,"%d",numTarefasTotal + 1);
+    strcat(processInfo[numTarefasAtivas],"task #");strcat(processInfo[numTarefasAtivas],numProcesso);strcat(processInfo[numTarefasAtivas],": ");
+    strcat(processInfo[numTarefasAtivas],"transform "); strcat(processInfo[numTarefasAtivas]," ");
+    strcat(processInfo[numTarefasAtivas],fichEnt);strcat(processInfo[numTarefasAtivas]," ");
+    strcat(processInfo[numTarefasAtivas],fichSaida);strcat(processInfo[numTarefasAtivas]," ");
+    for (int i = 0;i < numFiltrosClient;i++) {
+        strcat(processInfo[numTarefasAtivas],filtros[i]);
+        strcat(processInfo[numTarefasAtivas]," ");
+    }
+    strcat(processInfo[numTarefasAtivas],"\n");
+}
+
+void shiftLeftID(int index) {
+    for (int i = index; i < numTarefasAtivas - 1;i++) {
+        processID[i] = processID[i+1];
+        processInfo[i] = processInfo[i+1];
+    }
+    numTarefasAtivas--;
+}
+
+void sendStatusClient (int fdClient,pid_t pidClient,pid_t pidServer)  {
+    for (int i = 0; i < numTarefasAtivas;i++) {
+        int status;
+        pid_t return_pid = waitpid(processID[i], &status, WNOHANG); /* WNOHANG def'd in wait.h */
+        if (return_pid == -1) {
+            perror("");
+        } else if (return_pid == 0) {
+            write(fdClient,processInfo[i],200);   
+        } else if (return_pid == processID[i]) {
+            shiftLeftID(i);i--;
+        }
+    }
+    for (int i = 0; i < *numFiltros;i++) {
+        char filtroInfo[150] = "filter ";
+        char useLimit[10];
+        sprintf(useLimit,"%d/%d ",filterUse[i],filterLimit[i]);
+        strcat(filtroInfo,filterID[i]);strcat(filtroInfo,": ");
+        strcat(filtroInfo,useLimit);strcat(filtroInfo," (running/max)\n");
+        write(fdClient,filtroInfo,150);
+    }
+    char pid[10];sprintf(pid,"%d",pidServer);
+    char pidS[20] = "pid: ";strcat(pidS,pid);strcat(pidS,"\n"); 
+    write(fdClient,pidS,20);
+    close(fdClient);
+    kill(pidClient,SIGPIPE);
+}
+
+void transformFile (char *fichEnt,char *fichSaida,char *filtros[],int numFiltrosClient,pid_t pid) {
+    if (possivelFiltro(filtros,numFiltrosClient)) {
+        if (verificaFiltros(filtros,numFiltrosClient)) {
+            kill(pid,SIGUSR2);
+            useFiltros(filtros,numFiltrosClient);
+            aplicaFiltros (filtros,numFiltrosClient,fichEnt,fichSaida);
+            removeFiltros(filtros,numFiltrosClient);
+            kill (pid,SIGTERM);
+        }
+        else {
+            kill(pid,SIGUSR1);
+            while (!verificaFiltros(filtros,numFiltrosClient));
+            kill(pid,SIGUSR2);
+            useFiltros(filtros,numFiltrosClient);
+            aplicaFiltros (filtros,numFiltrosClient,fichEnt,fichSaida);
+            removeFiltros(filtros,numFiltrosClient);
+            kill (pid,SIGTERM);
+        }
+    }
+    else kill(pid,SIGTERM);
+}
+
 int main(int argc, char *argv[]) {
     if (argc == 3) {
         numFiltros = mmap(NULL,sizeof(int),PROT_READ | PROT_WRITE,MAP_SHARED | MAP_ANONYMOUS,-1,0);
@@ -159,7 +236,7 @@ int main(int argc, char *argv[]) {
         filterLimit = mmap(NULL,sizeof(int) * 10,PROT_READ | PROT_WRITE,MAP_SHARED | MAP_ANONYMOUS,-1,0);
         filterUse = mmap(NULL,sizeof(int) * 10,PROT_READ | PROT_WRITE,MAP_SHARED | MAP_ANONYMOUS,-1,0);
 
-        int fdConf,numTarefas;
+        int fdConf;
         if ((fdConf = open(argv[1],O_RDONLY)) == -1) perror("");
         else {
         *numFiltros = getConf (fdConf,argv[2]);
@@ -174,46 +251,36 @@ int main(int argc, char *argv[]) {
             int pclient = open (clientPID,O_RDWR);
             if (pclient == -1) perror(clientPID);
             else {
-                int numFiltrosClient = 0;
+                int numFiltrosClient = 0,p;
                 char *filtros[10];
                 char *args = malloc(150);
                 readln (pclient,args,150);
                 char *comando = strsep(&args," ");
-                printf("%d\n",filterUse[2]);
                 if (strcmp(comando,"transform") == 0) {
-                    numTarefas++;
-                    if (fork() == 0) {
                     char *fichEnt = strsep(&args," ");
                     char *fichSaida = strsep(&args," ");
                     char *filtrosLine = strsep(&args,"\n");
                     while (filtrosLine != NULL && *filtrosLine != '\0')  {
                         filtros[numFiltrosClient++] = strsep(&filtrosLine," ");
                     }
-                    if (possivelFiltro(filtros,numFiltrosClient)) {
-                    if (verificaFiltros(filtros,numFiltrosClient)) {
-                        kill(pid,SIGUSR2);
-                        useFiltros(filtros,numFiltrosClient);
-                        aplicaFiltros (filtros,numFiltrosClient,fichEnt,fichSaida);
-                        removeFiltros(filtros,numFiltrosClient);
-                        kill (pid,SIGTERM);
+                    if ((p = fork()) == 0) {
+                        transformFile(fichEnt,fichSaida,filtros,numFiltrosClient,pid);
+                        close(pr);
+                        close (pclient);
+                        _exit(1);
                     }
                     else {
-                        kill(pid,SIGUSR1);
-                        while (!verificaFiltros(filtros,numFiltrosClient));
-                        kill(pid,SIGUSR2);
-                        useFiltros(filtros,numFiltrosClient);
-                        aplicaFiltros (filtros,numFiltrosClient,fichEnt,fichSaida);
-                        removeFiltros(filtros,numFiltrosClient);
-                        kill (pid,SIGTERM);
+                        processID[numTarefasAtivas] = p;
+                        preenchePInfo (fichEnt,fichSaida,filtros,numFiltrosClient);
+                        numTarefasTotal++;numTarefasAtivas++;
                     }
-                    close(pr);
-                    _exit(1);
-                    }
-                    else kill(pid,SIGTERM);
                 }
-                    numTarefas--;
+                if (strcmp(comando,"status\n") == 0) {
+                    pid_t pidS  = getpid();
+                    sendStatusClient (pclient,pid,pidS);
                 }
             }
+            close(pclient);
             close(pr);
             }
         }

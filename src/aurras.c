@@ -8,6 +8,8 @@
 #include <stdlib.h>
 #include <sys/stat.h>
 
+int leitura = 0;
+
 char * formaLinhaArgs (char *argv[],int argc) {
     char *buffer = malloc (150);
     for (int i = 1;i < argc;i++) {
@@ -53,15 +55,36 @@ void sigTerm (int num) {
     _exit(0);
 }
 
+void sigpipe(int num) {
+    leitura = 1;
+}
+
 int main(int argc,char *argv[]) {
     if (signal(SIGUSR1,sighandler1) == SIG_ERR) perror("");
     if (signal(SIGUSR2,sighandler2) == SIG_ERR) perror("");
     if (signal(SIGTERM,sigTerm) == SIG_ERR) perror("");
+    if (signal(SIGPIPE,sigpipe) == SIG_ERR) perror("");
     if (argc == 1) {
         write (1,"./aurras status\n./aurras transform input-filename output-filename filter-id1 filter-id2 ...\n",92);
     }
     else if (argc == 2 && strcmp(argv[1],"status") == 0) {
-        write (1,"estado do servidor\n",19);
+        int pw = open ("servidor",O_WRONLY);
+        char sPID[12];
+        char buffer[500];
+        pid_t pid = getpid();
+        sprintf(sPID, "%d", pid);
+        mkfifo(sPID,0666);
+        write(pw,&pid,4);
+        close(pw);
+        int fw = open (sPID,O_RDWR);
+        write (fw,"status\n",7);
+        int fr = open (sPID,O_RDONLY);
+        while (!leitura) pause();
+        close(fw);
+        int res = 0;
+        while((res = readln (fr,buffer,500)) > 0)
+            write (1,buffer,res);
+        kill(getpid(),SIGTERM);
     }
     else if (argc >= 4 && strcmp(argv[1],"transform") == 0) {
         int pw = open ("servidor",O_WRONLY);
