@@ -76,11 +76,11 @@ int main(int argc,char *argv[]) {
         pid_t pid = getpid();
         sprintf(sPID, "%d", pid);
         mkfifo(sPID,0666);
-        write(pw,&pid,4);
+        write(pw,&pid,sizeof (pid_t));
         close(pw);
-        int fw = open (sPID,O_RDWR);
-        write (fw,"status\n",7);
+        int fw = open (sPID,O_WRONLY);
         int fr = open (sPID,O_RDONLY);
+        write (fw,"status\n",7);
         while (!leitura) pause();
         close(fw);
         int res = 0;
@@ -97,7 +97,7 @@ int main(int argc,char *argv[]) {
         pid_t pid = getpid();
         sprintf(sPID, "%d", pid);
         mkfifo(sPID,0666);
-        write(pw,&pid,4);
+        write(pw,&pid,sizeof (pid_t));
         close(pw);
         char *args = formaLinhaArgs (argv,argc);
         int pr = open (sPID,O_RDWR);

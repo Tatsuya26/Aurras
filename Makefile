@@ -21,5 +21,5 @@ clean:
 
 test:
 	bin/aurras
+	bin/aurras transform samples/sample-1-so.m4a output.m4a alto eco rapido
 	bin/aurras status
-	bin/aurras transform samples/sample-1.m4a output.m4a alto eco rapido

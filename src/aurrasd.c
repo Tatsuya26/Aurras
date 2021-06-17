@@ -21,6 +21,7 @@ char *processInfo[1000];
 int numTarefasAtivas = 0;
 int numTarefasTotal = 0;
 
+
 void sigTermhandler (int num) {
     unlink("servidor");
     int s;
@@ -71,9 +72,11 @@ int checkFilter (char *filtro) {
     return -1;
 }
 
-void aplicaFiltros (char *filtros[],int numFiltrosClient,char *fichEnt,char* fichSaida) {
+void aplicaFiltros (char *filtros[],int numFiltrosClient,char *fichEnt,char* fichSaida,pid_t pidC) {
     int pipes[numFiltrosClient-1][2];
     int s;
+    int fdEnt = open (fichEnt,O_RDONLY);
+    int fdSaida = open (fichSaida,O_CREAT | O_TRUNC | O_WRONLY,0666);
     for (int i = 0; i  < numFiltrosClient-1;i++) {
         pipe(pipes[i]);
     }
@@ -81,7 +84,6 @@ void aplicaFiltros (char *filtros[],int numFiltrosClient,char *fichEnt,char* fic
         if (i == 0) {
             int p = fork();
             if (p == 0) {
-                int fdEnt = open (fichEnt,O_RDONLY);
                 dup2(fdEnt,0);
                 dup2(pipes[i][1],1);
                 int findex = checkFilter(filtros[i]);
@@ -95,7 +97,6 @@ void aplicaFiltros (char *filtros[],int numFiltrosClient,char *fichEnt,char* fic
         else if (i == numFiltrosClient-1) {
             int p = fork();
             if (p == 0) {
-                int fdSaida = open (fichSaida,O_CREAT | O_TRUNC | O_WRONLY,0666);
                 dup2(fdSaida,1);
                 dup2(pipes[i-1][0],0);
                 int findex = checkFilter(filtros[i]);
@@ -123,20 +124,33 @@ void aplicaFiltros (char *filtros[],int numFiltrosClient,char *fichEnt,char* fic
             }
         }
     }
+    close (fdEnt);
+    close (fdSaida);
     for (int i = 0;i < numFiltrosClient;i++) 
         wait(&s);
 }
 
-int possivelFiltro (char *filtros[],int numFiltrosClient) {
+int possivelFiltro (char *filtros[],int numFiltrosClient,char *fichEnt,char*fichSaida) {
     int filtroMax[*numFiltros];
     for (int i = 0;i < *numFiltros;i++) 
         filtroMax[i] = 0;
     for (int i = 0;i < numFiltrosClient;i++) {
         int findex = checkFilter(filtros[i]);
+        if (findex == -1) return 0;
         filtroMax[findex]++;
     }
     for (int i = 0; i < *numFiltros;i++)
         if (filtroMax[i] > filterLimit[i]) return 0;
+    int fdEnt = open (fichEnt,O_RDONLY);
+    if (fdEnt == -1) {
+        write(2,"Erro no ficheiro de entrada!\n",29);
+        return 0;
+    }
+    int fdSaida = open (fichSaida,O_CREAT | O_TRUNC | O_WRONLY,0666);
+    if (fdSaida == -1) {
+        write(2,"Erro no ficheiro de saida!\n",27);
+        return 0;
+    }
     return 1;
 }
 
@@ -193,9 +207,7 @@ void sendStatusClient (int fdClient,pid_t pidClient,pid_t pidServer)  {
     for (int i = 0; i < numTarefasAtivas;i++) {
         int status;
         pid_t return_pid = waitpid(processID[i], &status, WNOHANG); /* WNOHANG def'd in wait.h */
-        if (return_pid == -1) {
-            perror("");
-        } else if (return_pid == 0) {
+        if (return_pid == 0) {
             write(fdClient,processInfo[i],200);   
         } else if (return_pid == processID[i]) {
             shiftLeftID(i);i--;
@@ -209,7 +221,7 @@ void sendStatusClient (int fdClient,pid_t pidClient,pid_t pidServer)  {
         strcat(filtroInfo,useLimit);strcat(filtroInfo," (running/max)\n");
         write(fdClient,filtroInfo,150);
     }
-    char pid[10];sprintf(pid,"%d",pidServer);
+    char pid[10]; sprintf(pid,"%d",pidServer);
     char pidS[20] = "pid: ";strcat(pidS,pid);strcat(pidS,"\n"); 
     write(fdClient,pidS,20);
     close(fdClient);
@@ -217,11 +229,11 @@ void sendStatusClient (int fdClient,pid_t pidClient,pid_t pidServer)  {
 }
 
 void transformFile (char *fichEnt,char *fichSaida,char *filtros[],int numFiltrosClient,pid_t pid) {
-    if (possivelFiltro(filtros,numFiltrosClient)) {
+    if (possivelFiltro(filtros,numFiltrosClient,fichEnt,fichSaida)) {
         if (verificaFiltros(filtros,numFiltrosClient)) {
             kill(pid,SIGUSR2);
             useFiltros(filtros,numFiltrosClient);
-            aplicaFiltros (filtros,numFiltrosClient,fichEnt,fichSaida);
+            aplicaFiltros (filtros,numFiltrosClient,fichEnt,fichSaida,pid);
             removeFiltros(filtros,numFiltrosClient);
             kill (pid,SIGTERM);
         }
@@ -230,7 +242,7 @@ void transformFile (char *fichEnt,char *fichSaida,char *filtros[],int numFiltros
             while (!verificaFiltros(filtros,numFiltrosClient));
             kill(pid,SIGUSR2);
             useFiltros(filtros,numFiltrosClient);
-            aplicaFiltros (filtros,numFiltrosClient,fichEnt,fichSaida);
+            aplicaFiltros (filtros,numFiltrosClient,fichEnt,fichSaida,pid);
             removeFiltros(filtros,numFiltrosClient);
             kill (pid,SIGTERM);
         }
@@ -239,7 +251,7 @@ void transformFile (char *fichEnt,char *fichSaida,char *filtros[],int numFiltros
 }
 
 int main(int argc, char *argv[]) {
-    if (signal(SIGTERM,sigTermhandler) == SIG_ERR) perror("");
+    if (signal(SIGTERM,sigTermhandler) == SIG_ERR) write (2,"Erro no signal SIGTERM\n",23);
     if (argc == 3) {
         numFiltros = mmap(NULL,sizeof(int),PROT_READ | PROT_WRITE,MAP_SHARED | MAP_ANONYMOUS,-1,0);
         filterFile = mmap(NULL,sizeof(char*) * 10,PROT_READ | PROT_WRITE,MAP_SHARED | MAP_ANONYMOUS,-1,0);
@@ -248,19 +260,19 @@ int main(int argc, char *argv[]) {
         filterUse = mmap(NULL,sizeof(int) * 10,PROT_READ | PROT_WRITE,MAP_SHARED | MAP_ANONYMOUS,-1,0);
 
         int fdConf;
-        if ((fdConf = open(argv[1],O_RDONLY)) == -1) perror("");
+        if ((fdConf = open(argv[1],O_RDONLY)) == -1) write (2,"Erro no ficheiro de configuracao do servidor\n",45);
         else {
         *numFiltros = getConf (fdConf,argv[2]);
         mkfifo("servidor",0666);
         while(1) {
             int pr = open("servidor",O_RDONLY);
             pid_t pid = 0;
-            int res = read (pr,&pid,4);
+            int res = read (pr,&pid,sizeof(pid_t));
             if (res > 0) {
             char clientPID[12];
             sprintf(clientPID, "%d", pid);
             int pclient = open (clientPID,O_RDWR);
-            if (pclient == -1) perror(clientPID);
+            if (pclient == -1) write (2,"Erro ao abrir o pipe do cliente\n",32);
             else {
                 int numFiltrosClient = 0,p;
                 char *filtros[10];
